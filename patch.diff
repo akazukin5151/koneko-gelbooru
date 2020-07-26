@@ -10,7 +10,7 @@ index 6bf0cbb..e32341f 100644
 +KONEKODIR = Path('cache').expanduser()
  TERM = Terminal()
 diff --git a/koneko/api.py b/koneko/api.py
-index 1e959f0..048bce3 100644
+index 1e959f0..2ce6826 100644
 --- a/koneko/api.py
 +++ b/koneko/api.py
 @@ -1,126 +1,27 @@
@@ -139,7 +139,7 @@ index 1e959f0..048bce3 100644
 +    def search_posts(self, tags) -> 'Json':
 +        """User input are in comma separated strings, need to be list[str]"""
 +        taglist = tags.split(',')
-+        return asyncio.run(self.gelbooru.search_posts(tags=taglist))
++        return asyncio.run(self.gelbooru.search_posts(tags=taglist, exclude_tags=['nude']))
  
      # Download
 -    @funcy.retry(tries=3, errors=(ConnectionError, PixivError))
@@ -343,7 +343,7 @@ index 228fc09..ad14443 100644
      return command
  
 diff --git a/koneko/ui.py b/koneko/ui.py
-index f455ced..3a6b12e 100644
+index f455ced..0ac14ec 100644
 --- a/koneko/ui.py
 +++ b/koneko/ui.py
 @@ -69,7 +69,7 @@ class AbstractUI(ABC):
@@ -355,6 +355,15 @@ index f455ced..3a6b12e 100644
  
      def _verify_up_to_date(self):
          if files.dir_not_empty(self._data):
+@@ -81,7 +81,7 @@ class AbstractUI(ABC):
+     def _show_then_fetch(self):
+         lscat.show_instant(self._tracker_class, self._data)
+         self._request_then_save()
+-        self._verify_up_to_date()
++        #self._verify_up_to_date()
+         self._print_page_info()
+ 
+     def _download_from_scratch(self) -> 'IO':
 @@ -175,7 +175,6 @@ class AbstractGallery(AbstractUI, ABC):
          """Implements abstractmethod: Indicate which posts are multi-image and
          current page number

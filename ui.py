@@ -81,7 +81,7 @@ class AbstractUI(ABC):
     def _show_then_fetch(self):
         lscat.show_instant(self._tracker_class, self._data)
         self._request_then_save()
-        self._verify_up_to_date()
+        #self._verify_up_to_date()
         self._print_page_info()
 
     def _download_from_scratch(self) -> 'IO':
