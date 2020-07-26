@@ -1,0 +1,414 @@
+diff --git a/koneko/__init__.py b/koneko/__init__.py
+index 6bf0cbb..e32341f 100644
+--- a/koneko/__init__.py
++++ b/koneko/__init__.py
+@@ -3,5 +3,5 @@ from pathlib import Path
+ from blessed import Terminal
+ 
+ __version__ = '0.10.0'
+-KONEKODIR = Path('~/.local/share/koneko/cache').expanduser()
++KONEKODIR = Path('cache').expanduser()
+ TERM = Terminal()
+diff --git a/koneko/api.py b/koneko/api.py
+index 1e959f0..048bce3 100644
+--- a/koneko/api.py
++++ b/koneko/api.py
+@@ -1,126 +1,27 @@
+-"""Handles all Pixiv API interactions, eg async login, requests"""
+-
+-import threading
++import shutil
++import asyncio
+ 
+ import funcy
+-from pixivpy3 import PixivError, AppPixivAPI
+-
+-from koneko import files, utils, KONEKODIR
++import requests
++from pygelbooru import Gelbooru
+ 
+ 
+ class APIHandler:
+-    """Singleton that handles all the API interactions in the program"""
+     def __init__(self):
+-        self._api_thread = threading.Thread(target=self._login)
+-        self._token_file = KONEKODIR.parent / 'token'
+-        self._token = files.read_token_file(self._token_file)
+-
+-        self._api = AppPixivAPI()  # Object to login and request on
+-        # Set in self.start() (because singleton is instantiated before config)
+-        self._credentials: 'dict[str, str]'
+-
+-    @funcy.once
+-    def start(self, credentials):
+-        """Start logging in. The only setup entry point that is public"""
+-        self._credentials = credentials
+-        self._api_thread.start()
+-
+-    @funcy.once
+-    def _await_login(self):
+-        """Wait for login to finish, then assign PixivAPI session to API"""
+-        self._api_thread.join()
+-
+-
+-    def _login(self):
+-        """Logins to pixiv in the background, using credentials from config file"""
+-        if self._token:  # Token is set if file found in self.start()
+-            token_success = self._login_with_token()
+-
+-        if not self._token or not token_success:
+-            response = self._login_with_creds()
+-            if response:
+-                self._token = response['response']['refresh_token']
+-                files.write_token_file(self._token_file, self._token)
+-
+-
+-    def _login_with_token(self) -> bool:
+-        """Tries to login with saved token to avoid pixiv emails
+-        Returns True on successful login with token, False otherwise
+-        """
+-        try:
+-            self._api.auth(refresh_token=self._token)
+-        except PixivError as e:
+-            return False
+-        return True
+-
+-
+-    def _login_with_creds(self) -> 'Optional[dict[dict[str]]]':
+-        try:
+-            return self._api.login(
+-                self._credentials['Username'],
+-                self._credentials['Password']
+-            )
+-
+-        except PixivError as e:
+-            print('Login failed! Please correct your credentials in '
+-                  '~/.config/koneko/config.ini')
+-            print(e)
+-            print("Press 'q' and enter to exit")
+-
+-
+-    # Public API request functions for each mode
+-    @funcy.retry(tries=3, errors=(ConnectionError, PixivError))
+-    @utils.spinner('')
+-    def artist_gallery(self, artist_user_id, offset):
+-        """Mode 1"""
+-        self._await_login()
+-        return self._api.user_illusts(artist_user_id, offset=offset)
+-
+-    @funcy.retry(tries=3, errors=(ConnectionError, PixivError))
+-    def protected_illust_detail(self, image_id):
+-        """Mode 2"""
+-        self._await_login()
+-        return self._api.illust_detail(image_id)
+-
+-    @funcy.retry(tries=3, errors=(ConnectionError, PixivError))
+-    def following_user_request(self, user_id, publicity, offset):
+-        """Mode 3"""
+-        self._await_login()
+-        return self._api.user_following(user_id, restrict=publicity, offset=offset)
+-
+-    @funcy.retry(tries=3, errors=(ConnectionError, PixivError))
+-    def search_user_request(self, searchstr, offset):
+-        """Mode 4"""
+-        self._await_login()
+-        return self._api.search_user(searchstr, offset=offset)
+-
+-    @funcy.retry(tries=3, errors=(ConnectionError, PixivError))
+-    @utils.spinner('')
+-    def illust_follow_request(self, restrict, offset):
+-        """Mode 5"""
+-        self._await_login()
+-        return self._api.illust_follow(restrict=restrict, offset=offset)
+-
+-    @funcy.retry(tries=3, errors=(ConnectionError, PixivError))
+-    @utils.spinner('')
+-    def illust_related_request(self, image_id, offset):
+-        """Mode 15 (1.5 * 10 so it's an int)"""
+-        self._await_login()
+-        return self._api.illust_related(illust_id=image_id, offset=offset)
++        self.gelbooru = Gelbooru()
+ 
+-    @funcy.retry(tries=3, errors=(ConnectionError, PixivError))
+-    @utils.spinner('')
+-    def illust_recommended_request(self, offset):
+-        """Mode 6"""
+-        self._await_login()
+-        return self._api.illust_recommended(offset=offset)
++    @funcy.retry(tries=3, errors=ConnectionError)
++    def search_posts(self, tags) -> 'Json':
++        """User input are in comma separated strings, need to be list[str]"""
++        taglist = tags.split(',')
++        return asyncio.run(self.gelbooru.search_posts(tags=taglist))
+ 
+     # Download
+-    @funcy.retry(tries=3, errors=(ConnectionError, PixivError))
+-    def protected_download(self, url, path, name):
+-        """Protect api download function with funcy.retry so it doesn't crash"""
+-        self._await_login()
+-        self._api.download(url, path=path, name=name)
++    @funcy.retry(tries=3, errors=ConnectionError)
++    def protected_download(self, url, path, name) -> 'IO':
++        r = requests.get(url, stream=True)
++        with open(path / name, 'wb') as f:
++            shutil.copyfileobj(r.raw, f)
+ 
+ 
+ myapi = APIHandler()
+diff --git a/koneko/data.py b/koneko/data.py
+index 649470f..468e58b 100644
+--- a/koneko/data.py
++++ b/koneko/data.py
+@@ -2,7 +2,7 @@
+ Functionally pure, no side effects (but stores state)
+ """
+ from abc import ABC, abstractmethod
+-from functools import lru_cache, cached_property
++from functools import lru_cache
+ 
+ from koneko import pure, KONEKODIR
+ 
+@@ -48,6 +48,14 @@ class AbstractData(ABC):
+     def next_offset(self) -> str:
+         return self.next_url.split('&')[-1].split('=')[-1]
+ 
++    @property
++    def all_urls(self) -> 'list[str]':
++        return [str(x) for x in self.all_pages_cache[self.page_num]]
++
++    @property
++    def all_names(self) -> 'list[str]':
++        return [x.filename for x in self.all_pages_cache[self.page_num]]
++
+     @property
+     def urls_as_names(self) -> 'list[str]':
+         return [pure.split_backslash_last(url) for url in self.all_urls]
+@@ -87,13 +95,13 @@ class GalleryData(AbstractData):
+     def next_url(self) -> str:
+         return self.all_pages_cache[self.page_num]['next_url']
+ 
+-    @property
+-    def all_urls(self) -> 'list[str]':
+-        return pure.medium_urls(self.current_illusts)
+-
+-    @property
+-    def all_names(self) -> 'list[str]':
+-        return pure.post_titles_in_page(self.current_illusts)
++#    @property
++#    def all_urls(self) -> 'list[str]':
++#        return pure.medium_urls(self.current_illusts)
++#
++#    @property
++#    def all_names(self) -> 'list[str]':
++#        return pure.post_titles_in_page(self.current_illusts)
+ 
+     # Unique
+     @property
+@@ -125,37 +133,36 @@ class UserData(AbstractData):
+         """Get the artist user id for a specified post number"""
+         return self._iterate_cache(lambda x: x['user']['id'])[post_number]
+ 
+-    @cached_property
++    @property
+     def all_urls(self) -> 'list[str]':
+         return self.profile_pic_urls + self.image_urls
+ 
+-    @cached_property
++    @property
+     def all_names(self) -> 'list[str]':
+         preview_names_ext = map(pure.split_backslash_last, self.image_urls)
+         preview_names = [x.split('.')[0] for x in preview_names_ext]
+         return self.names + preview_names
+ 
+     # Unique
+-    @cached_property
++    @property
+     def names(self) -> 'list[str]':
+         return self._iterate_cache(lambda x: x['user']['name'])
+ 
+-    @cached_property
++    @property
+     def profile_pic_urls(self) -> 'list[str]':
+         return self._iterate_cache(lambda x: x['user']['profile_image_urls']['medium'])
+ 
+-    @lru_cache
+-    def _iterate_cache(self, func) -> 'list[str]':
++    def _iterate_cache(self, func: 'fn(x: Json) -> str') -> 'list[str]':
+         return [func(x) for x in self.all_pages_cache[self.page_num]]
+ 
+-    @cached_property
++    @property
+     def image_urls(self) -> 'list[str]':
+         return [illust['image_urls']['square_medium']
+                 for post in self.all_pages_cache[self.page_num]
+                 for illust in post['illusts']]
+ 
+ 
+-    @cached_property
++    @property
+     def splitpoint(self) -> int:
+         """Number of artists. The number where artists stop and previews start"""
+         return len(self.profile_pic_urls)
+diff --git a/koneko/main.py b/koneko/main.py
+index a0be612..95ded00 100755
+--- a/koneko/main.py
++++ b/koneko/main.py
+@@ -34,22 +34,16 @@ def main():
+     if not (args := cli.handle_vh()):
+         sys.exit(0)
+ 
+-    credentials, your_id = config.begin_config()
+-
+-    utils.handle_missing_pics()
+-
+-    api.myapi.start(credentials)
+-
+     if len(sys.argv) != 1:
+         func = cli.launch_mode
+     else:
+         func = main_loop
+ 
+     try:
+-        func(args, your_id)
++        func(args, None)
+     except KeyboardInterrupt:
+         os.system('clear')
+-        main_loop(args, your_id)
++        main_loop(args, None)
+ 
+ 
+ def main_loop(_, your_id: str):
+@@ -145,19 +139,10 @@ class AbstractLoop(ABC):
+         self._user_input = pure.process_user_url(self._raw_answer)
+ 
+     def _validate_input(self) -> 'bool':
+-        if self._user_input == '!freq':
+-            return True
+-
+-        try:
+-            int(self._user_input)
+-        except ValueError:
+-            return False
+         return True
+ 
+     def _save_history(self):
+-        if self._user_input != '!freq':
+-            logger = utils.setup_history_log()
+-            logger.info(str(self) + ': ' + self._user_input)
++        pass
+ 
+ 
+ class ArtistModeLoop(AbstractLoop):
+@@ -165,7 +150,7 @@ class ArtistModeLoop(AbstractLoop):
+ 
+     def _prompt_url_id(self) -> str:
+         """Implements abstractmethod: prompt for artist ID or url"""
+-        self._raw_answer = input('Enter artist ID or url:\n')
++        self._raw_answer = input('Enter tags to search here:\n')
+ 
+     def _go_to_mode(self):
+         """Implements abstractmethod: go to mode 1"""
+diff --git a/koneko/screens.py b/koneko/screens.py
+index 228fc09..ad14443 100644
+--- a/koneko/screens.py
++++ b/koneko/screens.py
+@@ -11,28 +11,13 @@ def begin_prompt(printmessage=True) -> 'IO[str]':
+         '',
+         f'Welcome to koneko v{__version__}\n',
+         'Select an action:',
+-        '1. View artist illustrations',
+-        '2. Open pixiv post',
+-        '3. View following artists',
+-        '4. Search for artists',
+-        '5. View illustrations of all following artists',
+-        '6. View recommended illustrations',
+-        'f. Frequent modes and user inputs', '',
+-        '?. Info',
+-        'm. Manual',
+-        'b. Browse cache (offline)',
++        '1. Search tag illusts',
+         'q. Quit',
+     )
+     if printmessage:
+         for message in messages:
+             print(' ' * 30, message)
+ 
+-    pixcat.Image(
+-        KONEKODIR.parent / 'pics' / '71471144_p0.png'
+-    ).thumbnail(600).show(
+-        align='left', y=0
+-    )
+-
+     command = input('\n\nEnter a command: ')
+     return command
+ 
+diff --git a/koneko/ui.py b/koneko/ui.py
+index f455ced..3a6b12e 100644
+--- a/koneko/ui.py
++++ b/koneko/ui.py
+@@ -69,7 +69,7 @@ class AbstractUI(ABC):
+             self._show_then_fetch()
+         else:
+             self._download_from_scratch()
+-        self._prefetch()
++        #self._prefetch()
+ 
+     def _verify_up_to_date(self):
+         if files.dir_not_empty(self._data):
+@@ -175,7 +175,6 @@ class AbstractGallery(AbstractUI, ABC):
+         """Implements abstractmethod: Indicate which posts are multi-image and
+         current page number
+         """
+-        printer.print_multiple_imgs(self._data.current_illusts)
+         print(f'Page {self._data.page_num}')
+ 
+     # Unique for Galleries
+@@ -247,7 +246,7 @@ class ArtistGallery(AbstractGallery):
+ 
+     def _pixivrequest(self):
+         """Implements abstractmethod: use the user-given id for request"""
+-        return api.myapi.artist_gallery(self._artist_user_id, self._data.offset)
++        return api.myapi.search_posts(self._artist_user_id)
+ 
+     def handle_prompt(self, keyseqs):
+         """Implements abstractmethod"""
+diff --git a/requirements.txt b/requirements.txt
+index 4a76d5d..9ebe92a 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -1,3 +1,4 @@
++pygelbooru~=0.3
+ PixivPy~=3.5
+ pixcat~=0.1
+ docopt~=0.6
+diff --git a/setup.py b/setup.py
+index b5010b0..84d391f 100644
+--- a/setup.py
++++ b/setup.py
+@@ -9,14 +9,14 @@ README = (HERE / 'README.md').read_text()
+ 
+ # Create the cache dir
+ # The pythonic way is so unnecessarily complicated for two lines of shell...
+-os.system('mkdir -p ~/.local/share/koneko')
+-os.system('cp -r ./pics/ ~/.local/share/koneko/')
+-os.system('cp example_config.ini ~/.local/share/koneko/')
++#os.system('mkdir -p ~/.local/share/koneko')
++#os.system('cp -r ./pics/ ~/.local/share/koneko/')
++#os.system('cp example_config.ini ~/.local/share/koneko/')
+ 
+ setup(
+     name='koneko',
+     version='0.10.0',
+-    description='Browse pixiv in the terminal',
++    description='Browse gelbooru in the terminal',
+     long_description=README,
+     long_description_content_type='text/markdown',
+     url='https://github.com/twenty5151/koneko',
+@@ -32,6 +32,7 @@ setup(
+     packages=['koneko'],
+     include_package_data=True,
+     install_requires=[
++        'pygelbooru~=0.3',
+         'PixivPy~=3.5',
+         'pixcat~=0.1',
+         'docopt~=0.6',
