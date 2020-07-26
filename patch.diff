@@ -156,18 +156,9 @@ index 1e959f0..2ce6826 100644
  
  myapi = APIHandler()
 diff --git a/koneko/data.py b/koneko/data.py
-index 649470f..468e58b 100644
+index 649470f..b3577b3 100644
 --- a/koneko/data.py
 +++ b/koneko/data.py
-@@ -2,7 +2,7 @@
- Functionally pure, no side effects (but stores state)
- """
- from abc import ABC, abstractmethod
--from functools import lru_cache, cached_property
-+from functools import lru_cache
- 
- from koneko import pure, KONEKODIR
- 
 @@ -48,6 +48,14 @@ class AbstractData(ABC):
      def next_offset(self) -> str:
          return self.next_url.split('&')[-1].split('=')[-1]
@@ -204,51 +195,14 @@ index 649470f..468e58b 100644
  
      # Unique
      @property
-@@ -125,37 +133,36 @@ class UserData(AbstractData):
-         """Get the artist user id for a specified post number"""
-         return self._iterate_cache(lambda x: x['user']['id'])[post_number]
- 
--    @cached_property
-+    @property
-     def all_urls(self) -> 'list[str]':
-         return self.profile_pic_urls + self.image_urls
- 
--    @cached_property
-+    @property
-     def all_names(self) -> 'list[str]':
-         preview_names_ext = map(pure.split_backslash_last, self.image_urls)
-         preview_names = [x.split('.')[0] for x in preview_names_ext]
-         return self.names + preview_names
- 
-     # Unique
--    @cached_property
-+    @property
-     def names(self) -> 'list[str]':
-         return self._iterate_cache(lambda x: x['user']['name'])
- 
--    @cached_property
-+    @property
+@@ -144,7 +152,6 @@ class UserData(AbstractData):
      def profile_pic_urls(self) -> 'list[str]':
          return self._iterate_cache(lambda x: x['user']['profile_image_urls']['medium'])
  
 -    @lru_cache
--    def _iterate_cache(self, func) -> 'list[str]':
-+    def _iterate_cache(self, func: 'fn(x: Json) -> str') -> 'list[str]':
+     def _iterate_cache(self, func) -> 'list[str]':
          return [func(x) for x in self.all_pages_cache[self.page_num]]
  
--    @cached_property
-+    @property
-     def image_urls(self) -> 'list[str]':
-         return [illust['image_urls']['square_medium']
-                 for post in self.all_pages_cache[self.page_num]
-                 for illust in post['illusts']]
- 
- 
--    @cached_property
-+    @property
-     def splitpoint(self) -> int:
-         """Number of artists. The number where artists stop and previews start"""
-         return len(self.profile_pic_urls)
 diff --git a/koneko/main.py b/koneko/main.py
 index a0be612..95ded00 100755
 --- a/koneko/main.py
