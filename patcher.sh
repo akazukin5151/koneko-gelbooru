@@ -13,6 +13,9 @@ if [ $clone -eq 1 ]; then
     cd build
 
     git clone https://github.com/twenty5151/koneko.git
+    cd koneko
+    git reset --hard 3fd60163972ef1e97f8c7af354847d23c460d8ff
+    cd ..
 
     cp ../*.py koneko/koneko
     rm koneko/setup.py
