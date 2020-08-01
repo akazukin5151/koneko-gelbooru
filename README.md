@@ -4,7 +4,7 @@ A rough and minimal example of how [koneko](https://github.com/twenty5151/koneko
 
 ![preview](preview.png)
 
-A diff file is automatically generated for convenience in [patch.diff](patch.diff).
+A diff file is automatically generated for convenience in [patch.diff](patch.diff). Note that it clones to commit [3fd60163972ef1e97f8c7af354847d23c460d8ff](https://github.com/twenty5151/koneko/commit/3fd60163972ef1e97f8c7af354847d23c460d8ff), which is around the time when this patcher was made. The patcher might fail with the up-to-date repo at koneko because of various changes.
 
 # Installation
 
